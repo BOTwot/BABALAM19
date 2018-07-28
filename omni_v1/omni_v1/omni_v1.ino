@@ -3,6 +3,7 @@
 #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
 #include "Wire.h"
 #endif
+#include "FlySkyIBus.h"
 
 #include <Wire.h>
 float heading, declinationAngle;
@@ -16,19 +17,6 @@ float rande;
 #define INTERRUPT_PIN 2  // use pin 2 on Arduino Uno & most boards
 #define LED_PIN 13 // (Arduino is 13, Teensy is 11, Teensy++ is 6)
 
-
-
-byte last_channel_1, last_channel_2, last_channel_3, last_channel_4;
-
-volatile int receiver_input_channel_1, receiver_input_channel_2, receiver_input_channel_3, receiver_input_channel_4;
-int counter_channel_1, counter_channel_2, counter_channel_3, counter_channel_4, loop_counter;
-
-int throttle, battery_voltage;
-
-int receiver_input[5];
-unsigned long timer_channel_1, timer_channel_2, timer_channel_3, timer_channel_4, esc_timer, esc_loop_timer;
-unsigned long timer_1, timer_2, timer_3, timer_4, current_time;
-unsigned long loop_timer;
 
 int desired_angle;
 bool dmpReady = false;  // set true if DMP init was successful
@@ -46,54 +34,6 @@ VectorFloat gravity;    // [x, y, z]            gravity vector
 
 float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gravity vector
 
-ISR(PCINT1_vect) {
-  current_time = micros();
-  //Channel 1=========================================
-  if (PINC & B00000001) {                                              //Is input 8 high?
-    if (last_channel_1 == 0) {                                              //Input 8 changed from 0 to 1.
-      last_channel_1 = 1;                                                   //Remember current input state.
-      timer_1 = current_time;                                               //Set timer_1 to current_time.
-    }
-  }
-  else if (last_channel_1 == 1) {                                           //Input 8 is not high and changed from 1 to 0.
-    last_channel_1 = 0;                                                     //Remember current input state.
-    receiver_input[1] = current_time - timer_1;                             //Channel 1 is current_time - timer_1.
-  }
-  //Channel 2=========================================
-  if (PINC & B00000010 ) {                                                  //Is input 9 high?
-    if (last_channel_2 == 0) {                                              //Input 9 changed from 0 to 1.
-      last_channel_2 = 1;                                                   //Remember current input state.
-      timer_2 = current_time;                                               //Set timer_2 to current_time.
-    }
-  }
-  else if (last_channel_2 == 1) {                                           //Input 9 is not high and changed from 1 to 0.
-    last_channel_2 = 0;                                                     //Remember current input state.
-    receiver_input[2] = current_time - timer_2;                             //Channel 2 is current_time - timer_2.
-  }
-  //Channel 3=========================================
-  if (PINC & B00000100 ) {                                                 //Is input 10 high?
-    if (last_channel_3 == 0) {                                              //Input 10 changed from 0 to 1.
-      last_channel_3 = 1;                                                   //Remember current input state.
-      timer_3 = current_time;                                               //Set timer_3 to current_time.
-    }
-  }
-  else if (last_channel_3 == 1) {                                           //Input 10 is not high and changed from 1 to 0.
-    last_channel_3 = 0;                                                     //Remember current input state.
-    receiver_input[3] = current_time - timer_3;                             //Channel 3 is current_time - timer_3.
-
-  }
-  //Channel 4=========================================
-  if (PINC & B00001000 ) {                                                  //Is input 11 high?
-    if (last_channel_4 == 0) {                                              //Input 11 changed from 0 to 1.
-      last_channel_4 = 1;                                                   //Remember current input state.
-      timer_4 = current_time;                                               //Set timer_4 to current_time.
-    }
-  }
-  else if (last_channel_4 == 1) {                                           //Input 11 is not high and changed from 1 to 0.
-    last_channel_4 = 0;                                                     //Remember current input state.
-    receiver_input[4] = current_time - timer_4;                             //Channel 4 is current_time - timer_4.
-  }
-}
 
 volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
 void dmpDataReady() {
@@ -193,11 +133,8 @@ float getHeading() {
 
 void setup() {
   Serial.begin(115200);
-  PCICR |= (1 << PCIE1);                                                    //Set PCIE0 to enable PCMSK0 scan.
-  PCMSK1 |= (1 << PCINT0);                                                  //Set PCINT0 (digital input 8) to trigger an interrupt on state change.
-  PCMSK1 |= (1 << PCINT1);                                                  //Set PCINT1 (digital input 9)to trigger an interrupt on state change.
-  PCMSK1 |= (1 << PCINT2);                                                  //Set PCINT2 (digital input 10)to trigger an interrupt on state change.
-  PCMSK1 |= (1 << PCINT3);
+  pinMode(LED_BUILTIN,OUTPUT);
+IBus.begin(Serial1);
 
   initg();
   Serial.print("heading:");
@@ -212,6 +149,7 @@ void setup() {
   desired_angle = rande;
   Serial.print("min");
   Serial.println(minimum);
+  digitalWrite(LED_BUILTIN,HIGH);
   delay(1000);
   pinMode(3, OUTPUT);
   pinMode(5, OUTPUT);
@@ -225,7 +163,8 @@ void setup() {
   analogWrite(11, 0);
 }
 void cw() {
-  pwm = abs(receiver_input[4] - 1500);
+  Serial.println("cw");
+  pwm = abs(IBus.readChannel(3) - 1500);
   pwm = pwm / 3;
   analogWrite(6, pwm);
   analogWrite(9, 0);
@@ -235,7 +174,9 @@ void cw() {
   analogWrite(5, 0);
 }
 void ccw() {
-  pwm = abs(receiver_input[4] - 1500);
+  Serial.println("ccw");
+  pwm = abs( 1500-IBus.readChannel(3) );
+ 
   pwm = pwm / 3;
   analogWrite(9, pwm);
   analogWrite(6, 0);
@@ -245,22 +186,37 @@ void ccw() {
   analogWrite(3, 0);
 }
 void nose_cw() {
-  pwm = abs(receiver_input[1] - 1500);
+  Serial.println("nose cw");
+  pwm = abs(IBus.readChannel(0) - 1500);
   pwm = pwm / 3;
   analogWrite(3, pwm);
   analogWrite(5, 0);
 }
 void nose_ccw() {
-  pwm = abs(receiver_input[1] - 1500);
+  Serial.println("nose ccw");
+  pwm = abs( 1500-IBus.readChannel(0));
   pwm = pwm / 3;
   analogWrite(3, 0);
   analogWrite(5, pwm);
 }
 
 void loop() {
-  if ((receiver_input[4] >= 1470 && receiver_input[4] <= 1530) &&
-      (receiver_input[1] >= 1470 && receiver_input[1] <= 1530) &&
-      (receiver_input[2] >= 1470 && receiver_input[2] <= 1530)) {
+  IBus.loop();
+  //       Serial.print(receiver_input[1]);
+  //        Serial.print("--");
+  //
+  //      Serial.print(receiver_input[2]);
+  //          Serial.print("--");
+  //
+  //      Serial.print(receiver_input[3]);
+  //          Serial.print("--");
+  //
+  //      Serial.println(receiver_input[4]);
+
+  if ((IBus.readChannel(3) >= 1470 && IBus.readChannel(3) <=  1530) &&
+      (IBus.readChannel(0) >= 1470 && IBus.readChannel(0)<=  1530) &&
+      (IBus.readChannel(1) >= 1470 && IBus.readChannel(1) <=  1530)) {
+          Serial.println("stoppppppppppppppp");
     desired_angle = getHeading();
     analogWrite(9, 0);
     analogWrite(6, 0);
@@ -269,21 +225,22 @@ void loop() {
     analogWrite(5, 0);
     analogWrite(3, 0);
   }
-  else if (receiver_input[4] > 1530) {
+  else if (IBus.readChannel(3) > 1530) {
     cw();
   }
-  else if (receiver_input[4] < 1470) {
+  else if (IBus.readChannel(3) < 1470) {
     ccw();
   }
-  else if (receiver_input[1] > 1530) {
+  else if (IBus.readChannel(0) >  1530) {
     nose_cw();
   }
-  else if (receiver_input[1] < 1470) {
+  else if (IBus.readChannel(0) < 1470) {
     nose_ccw();
   }
-  else if (receiver_input[2] > 1530) {
+  else if (IBus.readChannel(1) < 1470) {
     //////////////
-    pwm = abs(receiver_input[2] - 1500);
+    Serial.println("fwddd");
+    pwm = abs(1500-IBus.readChannel(1) );
     pwm = pwm / 3;
     if (getHeading() > desired_angle) {
       speedo = (getHeading() - desired_angle) * Kp + constant;
@@ -317,10 +274,10 @@ void loop() {
 
 
   }
-  else if (receiver_input[2] < 1470) {
+  else if (IBus.readChannel(1) >  1530) {
     //////////
-
-    pwm = abs(receiver_input[2] - 1500);
+    Serial.println("revvvvvvvvvvvddd");
+    pwm = abs( IBus.readChannel(1) - 1500);
     pwm = pwm / 3;
     if (getHeading() > desired_angle) {
       speedo = (getHeading() - desired_angle) * Kp + constant;
@@ -354,7 +311,7 @@ void loop() {
   }
 
 
-  //     if Serial.print(receiver_input[1]);
+  //    Serial.print(receiver_input[1]);
   //      Serial.print("--");
   //
   //    Serial.print(receiver_input[2]);
